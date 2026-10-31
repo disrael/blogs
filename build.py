@@ -232,6 +232,10 @@ def main():
 
     (DIST_DIR / ".nojekyll").write_text("", encoding="utf-8")
 
+    # Automatically copy any root Google/Bing verification HTML files into dist/
+    for html_v in Path(".").glob("google*.html"):
+        shutil.copy2(html_v, DIST_DIR / html_v.name)
+
     html_files = sorted(EXPORT_DIR.glob("**/*.html"), reverse=True)
     posts_index = []
 
