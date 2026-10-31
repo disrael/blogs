@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from markdownify import MarkdownConverter
 
 EXPORT_DIR = Path("medium-export")
-CACHE_ASSETS_DIR = Path("assets")  # Tracked in Git so images only download ONCE
+CACHE_ASSETS_DIR = Path("assets")
 DIST_DIR = Path("dist")
 ASSETS_DIR = DIST_DIR / "assets"
 POSTS_HTML_DIR = DIST_DIR / "posts"
@@ -67,7 +67,6 @@ def parse_medium_filename(filepath: Path):
 
 
 def get_candidate_urls(url: str) -> list[str]:
-    """Returns primary URL plus miro.medium.com fallback if applicable."""
     urls = [url]
     if "cdn-images-1.medium.com/max/" in url:
         miro_url = url.replace(
@@ -92,13 +91,12 @@ def download_image(url: str, slug: str) -> str:
     cached_path = CACHE_ASSETS_DIR / filename
     dist_path = ASSETS_DIR / filename
 
-    # If not already in our persistent repo cache, download with polite pacing & 429 retry
     if not cached_path.exists():
         downloaded = False
         for attempt in range(1, 5):
             for candidate_url in get_candidate_urls(url):
                 try:
-                    time.sleep(1.25)  # Polite pacing to avoid Medium 429 rate limits
+                    time.sleep(1.25)
                     resp = SESSION.get(candidate_url, timeout=20)
                     if resp.status_code == 200 and resp.content:
                         cached_path.write_bytes(resp.content)
@@ -107,20 +105,13 @@ def download_image(url: str, slug: str) -> str:
                         break
                     elif resp.status_code == 429:
                         retry_after = int(resp.headers.get("Retry-After", 8 * attempt))
-                        print(f"  [~] Rate limited (429), sleeping {retry_after}s (attempt {attempt}/4)...")
+                        print(f"  [~] Rate limited (429), sleeping {retry_after}s...")
                         time.sleep(retry_after)
-                    else:
-                        print(f"  [!] HTTP {resp.status_code} on {candidate_url}")
                 except Exception as e:
                     print(f"  [!] Error downloading {candidate_url}: {e}")
             if downloaded:
                 break
 
-        if not downloaded:
-            print(f"  [X] Giving up on image for now: {url}")
-            return url
-
-    # Copy from persistent cache into dist/assets/
     if cached_path.exists() and not dist_path.exists():
         shutil.copy2(cached_path, dist_path)
 
@@ -290,6 +281,7 @@ def main():
             "char_count": len(markdown_body)
         })
 
+    # 1. Generate /llms.txt
     llms_lines = [
         f"# {BLOG_TITLE}",
         "",
@@ -306,9 +298,26 @@ def main():
 
     (DIST_DIR / "llms.txt").write_text("\n".join(llms_lines), encoding="utf-8")
 
-    robots_txt = "User-agent: *\nAllow: /\n\nUser-agent: Google-Extended\nAllow: /\n"
+    # 2. Generate /sitemap.xml
+    sitemap_urls = [f"{SITE_URL}/", f"{SITE_URL}/llms.txt"]
+    for p in posts_index:
+        sitemap_urls.append(p["html_url"])
+        sitemap_urls.extend(p["chunk_urls"])
+
+    sitemap_xml = [
+        '<?xmlw version="1.0" encoding="UTF-8"?>' if False else '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+    ]
+    for u in sitemap_urls:
+        sitemap_xml.append(f"  <url><loc>{u}</loc></url>")
+    sitemap_xml.append("</urlset>")
+    (DIST_DIR / "sitemap.xml").write_text("\n".join(sitemap_xml), encoding="utf-8")
+
+    # 3. Generate /robots.txt with Sitemap pointer
+    robots_txt = f"User-agent: *\nAllow: /\n\nUser-agent: Google-Extended\nAllow: /\n\nSitemap: {SITE_URL}/sitemap.xml\n"
     (DIST_DIR / "robots.txt").write_text(robots_txt, encoding="utf-8")
 
+    # 4. Generate /index.html
     index_items = []
     for p in posts_index:
         parts_str = " &bull; ".join(
@@ -316,7 +325,7 @@ def main():
         )
         index_items.append(
             f'<li><strong><a href="{p["html_url"]}">{p["title"]}</a></strong> '
-            f'<br><small>{p["date"]} ({p["char_count"]:,} chars) &bull; {parts_str}</small></li>'
+            f'<br><small>{p["date"]} ({p["char_count']:,} chars) &bull; {parts_str}</small></li>'
         )
     index_html = build_html_page(
         BLOG_TITLE,
@@ -325,7 +334,7 @@ def main():
         + "\n</ul>"
     )
     (DIST_DIR / "index.html").write_text(index_html, encoding="utf-8")
-    print(f"\nDone! Built {len(posts_index)} essays into {DIST_DIR}/")
+    print(f"\nDone! Built {len(posts_index)} essays into {DIST_DIR}/ with sitemap.xml.")
 
 
 if __name__ == "__main__":
