@@ -305,7 +305,7 @@ def main():
         sitemap_urls.extend(p["chunk_urls"])
 
     sitemap_xml = [
-        '<?xmlw version="1.0" encoding="UTF-8"?>' if False else '<?xml version="1.0" encoding="UTF-8"?>',
+        '<?xml version="1.0" encoding="UTF-8"?>',
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     ]
     for u in sitemap_urls:
@@ -323,9 +323,10 @@ def main():
         parts_str = " &bull; ".join(
             [f'<a href="{u}">MD Part {i+1}</a>' for i, u in enumerate(p["chunk_urls"])]
         )
+        cc = f"{p['char_count']:,}"
         index_items.append(
             f'<li><strong><a href="{p["html_url"]}">{p["title"]}</a></strong> '
-            f'<br><small>{p["date"]} ({p["char_count']:,} chars) &bull; {parts_str}</small></li>'
+            f'<br><small>{p["date"]} ({cc} chars) &bull; {parts_str}</small></li>'
         )
     index_html = build_html_page(
         BLOG_TITLE,
