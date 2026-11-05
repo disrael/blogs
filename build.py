@@ -318,7 +318,7 @@ def main():
     (DIST_DIR / "sitemap.xml").write_text("\n".join(sitemap_xml), encoding="utf-8")
 
     # 3. Generate /robots.txt with Sitemap pointer
-    robots_txt = f"User-agent: *\nAllow: /\n\nUser-agent: Google-Extended\nAllow: /\n\nSitemap: {SITE_URL}/sitemap.xml\n"
+    robots_txt = f"User-agent: *\nAllow: /\n\nSitemap: {SITE_URL}/sitemap.xml\n"
     (DIST_DIR / "robots.txt").write_text(robots_txt, encoding="utf-8")
 
     # 4. Generate /index.html
