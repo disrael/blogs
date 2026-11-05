@@ -231,6 +231,7 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
 
     (DIST_DIR / ".nojekyll").write_text("", encoding="utf-8")
+    (DIST_DIR / "CNAME").write_text("blog.uclude.com", encoding="utf-8")
 
     # Automatically copy any root Google/Bing verification HTML files into dist/
     for html_v in Path(".").glob("google*.html"):
