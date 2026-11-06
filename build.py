@@ -187,7 +187,13 @@ def chunk_markdown(title: str, date_str: str, slug: str, full_md: str) -> list[s
     return chunk_urls
 
 
-def build_html_page(title: str, content_html: str, date_str: str = "", chunk_urls: list[str] = None) -> str:
+def build_html_page(
+    title: str,
+    content_html: str,
+    date_str: str = "",
+    chunk_urls: list[str] = None,
+    canonical_url: str = "",
+) -> str:
     raw_links = ""
     if chunk_urls:
         links_html = " | ".join(
@@ -195,12 +201,14 @@ def build_html_page(title: str, content_html: str, date_str: str = "", chunk_url
         )
         raw_links = f'<p class="meta">Date: {date_str} &bull; Raw AI/Markdown: {links_html}</p>'
 
+    canonical_tag = f'\n<link rel="canonical" href="{canonical_url}">' if canonical_url else ""
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
+<title>{title}</title>{canonical_tag}
 <style>
   body {{ max-width: 720px; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, -apple-system, sans-serif; line-height: 1.65; color: #1a1a1a; }}
   img {{ max-width: 100%; height: auto; border-radius: 4px; }}
@@ -272,7 +280,7 @@ def main():
         chunk_urls = chunk_markdown(title, date_str, slug, markdown_body)
 
         html_out = build_html_page(
-            title, f"<h1>{title}</h1>\n{str(body_el)}", date_str, chunk_urls
+            title, f"<h1>{title}</h1>\n{str(body_el)}", date_str, chunk_urls, f"{SITE_URL}/posts/{slug}.html"
         )
         html_filename = f"{slug}.html"
         (POSTS_HTML_DIR / html_filename).write_text(html_out, encoding="utf-8")
@@ -337,7 +345,8 @@ def main():
         BLOG_TITLE,
         f"<h1>{BLOG_TITLE}</h1>\n<p>AI-readable index: <a href='{SITE_URL}/llms.txt'>/llms.txt</a></p>\n<ul>\n"
         + "\n".join(index_items)
-        + "\n</ul>"
+        + "\n</ul>", 
+        f"{SITE_URL}"
     )
     (DIST_DIR / "index.html").write_text(index_html, encoding="utf-8")
     print(f"\nDone! Built {len(posts_index)} essays into {DIST_DIR}/ with sitemap.xml.")
