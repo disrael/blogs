@@ -16,7 +16,7 @@ ASSETS_DIR = DIST_DIR / "assets"
 POSTS_HTML_DIR = DIST_DIR / "posts"
 RAW_MD_DIR = DIST_DIR / "raw"
 
-SITE_URL = os.environ.get("SITE_URL", "https://blog.uclude.com").rstrip("/")
+SITE_URL = "https://blog.uclude.com"
 BLOG_TITLE = "The Polis — David Israel"
 
 MAX_CHARS = 8500
