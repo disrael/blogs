@@ -346,7 +346,7 @@ def main():
         f"<h1>{BLOG_TITLE}</h1>\n<p>AI-readable index: <a href='{SITE_URL}/llms.txt'>/llms.txt</a></p>\n<ul>\n"
         + "\n".join(index_items)
         + "\n</ul>", 
-        f"{SITE_URL}"
+        canonical_url=f"{SITE_URL}"
     )
     (DIST_DIR / "index.html").write_text(index_html, encoding="utf-8")
     print(f"\nDone! Built {len(posts_index)} essays into {DIST_DIR}/ with sitemap.xml.")
