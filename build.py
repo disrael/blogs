@@ -3,18 +3,17 @@ import re
 import time
 import shutil
 import hashlib
+from html import escape
 from pathlib import Path
 from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
-from markdownify import MarkdownConverter
 
 EXPORT_DIR = Path("medium-export")
 CACHE_ASSETS_DIR = Path("assets")
 DIST_DIR = Path("dist")
 ASSETS_DIR = DIST_DIR / "assets"
 POSTS_HTML_DIR = DIST_DIR / "posts"
-RAW_MD_DIR = DIST_DIR / "raw"
 
 SITE_URL = "https://blog.uclude.com"
 BLOG_TITLE = "The Polis — David Israel"
@@ -29,25 +28,12 @@ SESSION.headers.update({
     "Referer": "https://medium.com/"
 })
 
-
-class MediumMarkdownConverter(MarkdownConverter):
-    def convert_figure(self, el, text, *args, **kwargs):
-        img = el.find("img")
-        caption = el.find("figcaption")
-        if img and img.get("src"):
-            src = img["src"]
-            alt = img.get("alt", "").strip()
-            cap_text = caption.get_text(" ", strip=True) if caption else ""
-            combined_alt = f"{alt} — {cap_text}".strip(" —") or "Image"
-            res = f"\n\n![{combined_alt}]({src})\n"
-            if cap_text:
-                res += f"*{cap_text}*\n"
-            return res + "\n"
-        return text
-
-
-def md(html, **options):
-    return MediumMarkdownConverter(**options).convert(html)
+ALLOWED_ATTRS = {
+    "a": {"href", "title"},
+    "img": {"src", "alt", "title"},
+    "td": {"colspan", "rowspan"},
+    "th": {"colspan", "rowspan"},
+}
 
 
 def parse_medium_filename(filepath: Path):
@@ -118,88 +104,99 @@ def download_image(url: str, slug: str) -> str:
     return f"{SITE_URL}/assets/{filename}"
 
 
-def split_oversized_block(block: str, budget: int) -> list[str]:
-    lines = block.split("\n")
+def split_oversized_text(text: str, budget: int) -> list[str]:
+    words = text.split(" ")
     chunks, cur, cur_len = [], [], 0
-    for line in lines:
-        if cur_len + len(line) + 1 > budget and cur:
-            chunks.append("\n".join(cur))
-            cur, cur_len = [line], len(line) + 1
+    for word in words:
+        if cur_len + len(word) + 1 > budget and cur:
+            chunks.append(f"<p>{escape(' '.join(cur))}</p>")
+            cur, cur_len = [word], len(word)
         else:
-            cur.append(line)
-            cur_len += len(line) + 1
+            cur.append(word)
+            cur_len += len(word) + 1
     if cur:
-        chunks.append("\n".join(cur))
+        chunks.append(f"<p>{escape(' '.join(cur))}</p>")
     return chunks
 
 
-def chunk_markdown(title: str, date_str: str, slug: str, full_md: str) -> list[str]:
-    paragraphs = full_md.split("\n\n")
-    raw_chunks = []
+def extract_clean_html_chunks(body_el) -> list[str]:
+    # Flatten Medium's nested section/div wrappers so content tags sit at top level
+    for wrapper in body_el.find_all(["section", "div"]):
+        wrapper.unwrap()
+
+    # Strip Medium's noisy attributes (graf classes, hashes, data-* attributes)
+    for tag in body_el.find_all(True):
+        allowed = ALLOWED_ATTRS.get(tag.name, set())
+        tag.attrs = {k: v for k, v in tag.attrs.items() if k in allowed}
+
+    budget = MAX_CHARS - 500
+    blocks = []
+
+    for child in body_el.children:
+        if getattr(child, "name", None):
+            block_html = str(child).strip()
+            if not block_html:
+                continue
+            if len(block_html) > budget and child.name != "figure":
+                blocks.extend(split_oversized_text(child.get_text(" ", strip=True), budget - 10))
+            else:
+                blocks.append(block_html)
+        else:
+            text = str(child).strip()
+            if text:
+                blocks.extend(split_oversized_text(text, budget - 10))
+
+    chunks = []
     current_chunk = []
     current_len = 0
-    budget = MAX_CHARS - 500
 
-    for para in paragraphs:
-        if len(para) > budget:
-            if current_chunk:
-                raw_chunks.append("\n\n".join(current_chunk))
-                current_chunk, current_len = [], 0
-            raw_chunks.extend(split_oversized_block(para, budget))
-            continue
-
-        para_len = len(para) + 2
-        if current_len + para_len > budget and current_chunk:
-            raw_chunks.append("\n\n".join(current_chunk))
-            current_chunk = [para]
-            current_len = para_len
+    for block in blocks:
+        block_len = len(block) + 1
+        if current_len + block_len > budget and current_chunk:
+            chunks.append("\n".join(current_chunk))
+            current_chunk = [block]
+            current_len = block_len
         else:
-            current_chunk.append(para)
-            current_len += para_len
+            current_chunk.append(block)
+            current_len += block_len
 
     if current_chunk:
-        raw_chunks.append("\n\n".join(current_chunk))
+        chunks.append("\n".join(current_chunk))
 
-    total_parts = len(raw_chunks)
-    chunk_urls = []
-
-    for idx, body in enumerate(raw_chunks, start=1):
-        filename = f"{slug}.md" if total_parts == 1 else f"{slug}.part{idx}.md"
-        url = f"{SITE_URL}/raw/{filename}"
-        chunk_urls.append(url)
-
-        header = [
-            f"# {title} (Part {idx} of {total_parts})" if total_parts > 1 else f"# {title}",
-            f"Date: {date_str}",
-        ]
-        if idx < total_parts:
-            header.append(f"Next Part: {SITE_URL}/raw/{slug}.part{idx + 1}.md")
-        if idx > 1:
-            header.append(f"Previous Part: {SITE_URL}/raw/{slug}.part{idx - 1}.md")
-
-        footer = []
-        if idx < total_parts:
-            footer.append(f"---\n**[Continue reading Part {idx + 1} of {total_parts}]({SITE_URL}/raw/{slug}.part{idx + 1}.md)**")
-
-        final_text = "\n".join(header) + "\n\n---\n\n" + body + ("\n\n" + "\n".join(footer) if footer else "")
-        (RAW_MD_DIR / filename).write_text(final_text, encoding="utf-8")
-
-    return chunk_urls
+    return chunks
 
 
 def build_html_page(
     title: str,
     content_html: str,
     date_str: str = "",
-    chunk_urls: list[str] = None,
+    part_urls: list[str] = None,
+    current_part: int = 1,
     canonical_url: str = "",
 ) -> str:
-    raw_links = ""
-    if chunk_urls:
-        links_html = " | ".join(
-            [f'<a href="{u}">Part {i+1} (.md)</a>' for i, u in enumerate(chunk_urls)]
-        )
-        raw_links = f'<p class="meta">Date: {date_str} &bull; Raw AI/Markdown: {links_html}</p>'
+    meta_bar = ""
+    footer_nav = ""
+
+    if date_str:
+        if part_urls and len(part_urls) > 1:
+            total = len(part_urls)
+            links_html = " | ".join(
+                [
+                    f"<strong>Part {i+1}</strong>" if (i + 1) == current_part else f'<a href="{u}">Part {i+1}</a>'
+                    for i, u in enumerate(part_urls)
+                ]
+            )
+            meta_bar = f'<p class="meta">Date: {date_str} &bull; Part {current_part} of {total}: {links_html}</p>'
+
+            nav_parts = []
+            if current_part > 1:
+                nav_parts.append(f'<a href="{part_urls[current_part - 2]}">&larr; Previous Part (Part {current_part - 1})</a>')
+            if current_part < total:
+                nav_parts.append(f'<strong><a href="{part_urls[current_part]}">Continue reading Part {current_part + 1} of {total} &rarr;</a></strong>')
+            if nav_parts:
+                footer_nav = f'\n<hr>\n<p class="meta">{" &bull; ".join(nav_parts)}</p>'
+        else:
+            meta_bar = f'<p class="meta">Date: {date_str}</p>'
 
     canonical_tag = f'\n<link rel="canonical" href="{canonical_url}">' if canonical_url else ""
 
@@ -222,10 +219,10 @@ def build_html_page(
 </style>
 </head>
 <body>
-<nav><a href="{SITE_URL}/">&larr; All Essays</a> | <a href="{SITE_URL}/llms.txt">llms.txt</a></nav>
+<nav><a href="{SITE_URL}/">&larr; All Essays</a></nav>
 <main>
-{raw_links}
-{content_html}
+{meta_bar}
+{content_html}{footer_nav}
 </main>
 </body>
 </html>"""
@@ -235,7 +232,7 @@ def main():
     CACHE_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)
-    for d in [ASSETS_DIR, POSTS_HTML_DIR, RAW_MD_DIR]:
+    for d in [ASSETS_DIR, POSTS_HTML_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
     (DIST_DIR / ".nojekyll").write_text("", encoding="utf-8")
@@ -274,48 +271,40 @@ def main():
             if src:
                 img["src"] = download_image(src, slug)
 
-        markdown_body = md(str(body_el), heading_style="ATX").strip()
-        markdown_body = re.sub(r"\n{3,}", "\n\n", markdown_body)
+        html_chunks = extract_clean_html_chunks(body_el)
+        total_parts = len(html_chunks)
 
-        chunk_urls = chunk_markdown(title, date_str, slug, markdown_body)
+        if total_parts == 1:
+            part_filenames = [f"{slug}.html"]
+        else:
+            part_filenames = [f"{slug}-part-{idx}.html" for idx in range(1, total_parts + 1)]
 
-        html_out = build_html_page(
-            title, f"<h1>{title}</h1>\n{str(body_el)}", date_str, chunk_urls, f"{SITE_URL}/posts/{slug}.html"
-        )
-        html_filename = f"{slug}.html"
-        (POSTS_HTML_DIR / html_filename).write_text(html_out, encoding="utf-8")
+        part_urls = [f"{SITE_URL}/posts/{fn}" for fn in part_filenames]
+
+        for idx, (chunk_body, fn, part_url) in enumerate(zip(html_chunks, part_filenames, part_urls), start=1):
+            page_title = f"{title} (Part {idx} of {total_parts})" if total_parts > 1 else title
+            html_out = build_html_page(
+                title=page_title,
+                content_html=f"<h1>{page_title}</h1>\n{chunk_body}",
+                date_str=date_str,
+                part_urls=part_urls,
+                current_part=idx,
+                canonical_url=part_url,
+            )
+            (POSTS_HTML_DIR / fn).write_text(html_out, encoding="utf-8")
 
         posts_index.append({
             "title": title,
             "date": date_str,
             "slug": slug,
-            "html_url": f"{SITE_URL}/posts/{html_filename}",
-            "chunk_urls": chunk_urls,
-            "char_count": len(markdown_body)
+            "part_urls": part_urls,
+            "char_count": len(plain_text),
         })
 
-    # 1. Generate /llms.txt
-    llms_lines = [
-        f"# {BLOG_TITLE}",
-        "",
-        "> Analytical essays on political economy, hierarchy, automation, and history.",
-        "> Every essay below is split into raw Markdown parts guaranteed to be <= 8,500 characters so AI web-browsing tools can read 100% of every post without truncation.",
-        "",
-        "## Essays",
-    ]
+    # 1. Generate /sitemap.xml (HTML pages only)
+    sitemap_urls = [f"{SITE_URL}/"]
     for p in posts_index:
-        llms_lines.append(f"- **{p['title']}** ({p['date']}, {p['char_count']:,} chars)")
-        for idx, c_url in enumerate(p["chunk_urls"], start=1):
-            part_label = f"Part {idx}/{len(p['chunk_urls'])}" if len(p["chunk_urls"]) > 1 else "Full Markdown"
-            llms_lines.append(f"  - [{part_label}]({c_url})")
-
-    (DIST_DIR / "llms.txt").write_text("\n".join(llms_lines), encoding="utf-8")
-
-    # 2. Generate /sitemap.xml
-    sitemap_urls = [f"{SITE_URL}/", f"{SITE_URL}/llms.txt"]
-    for p in posts_index:
-        sitemap_urls.append(p["html_url"])
-        sitemap_urls.extend(p["chunk_urls"])
+        sitemap_urls.extend(p["part_urls"])
 
     sitemap_xml = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -326,30 +315,35 @@ def main():
     sitemap_xml.append("</urlset>")
     (DIST_DIR / "sitemap.xml").write_text("\n".join(sitemap_xml), encoding="utf-8")
 
-    # 3. Generate /robots.txt with Sitemap pointer
+    # 2. Generate /robots.txt with Sitemap pointer
     robots_txt = f"User-agent: *\nAllow: /\n\nSitemap: {SITE_URL}/sitemap.xml\n"
     (DIST_DIR / "robots.txt").write_text(robots_txt, encoding="utf-8")
 
-    # 4. Generate /index.html
+    # 3. Generate /index.html
     index_items = []
     for p in posts_index:
-        parts_str = " &bull; ".join(
-            [f'<a href="{u}">MD Part {i+1}</a>' for i, u in enumerate(p["chunk_urls"])]
-        )
         cc = f"{p['char_count']:,}"
-        index_items.append(
-            f'<li><strong><a href="{p["html_url"]}">{p["title"]}</a></strong> '
-            f'<br><small>{p["date"]} ({cc} chars) &bull; {parts_str}</small></li>'
-        )
+        if len(p["part_urls"]) > 1:
+            parts_str = " &bull; ".join(
+                [f'<a href="{u}">Part {i+1}</a>' for i, u in enumerate(p["part_urls"])]
+            )
+            index_items.append(
+                f'<li><strong><a href="{p["part_urls"][0]}">{p["title"]}</a></strong> '
+                f'<br><small>{p["date"]} ({cc} chars) &bull; {parts_str}</small></li>'
+            )
+        else:
+            index_items.append(
+                f'<li><strong><a href="{p["part_urls"][0]}">{p["title"]}</a></strong> '
+                f'<br><small>{p["date"]} ({cc} chars)</small></li>'
+            )
+
     index_html = build_html_page(
-        BLOG_TITLE,
-        f"<h1>{BLOG_TITLE}</h1>\n<p>AI-readable index: <a href='{SITE_URL}/llms.txt'>/llms.txt</a></p>\n<ul>\n"
-        + "\n".join(index_items)
-        + "\n</ul>", 
-        canonical_url=f"{SITE_URL}"
+        title=BLOG_TITLE,
+        content_html=f"<h1>{BLOG_TITLE}</h1>\n<ul>\n" + "\n".join(index_items) + "\n</ul>",
+        canonical_url=f"{SITE_URL}/",
     )
     (DIST_DIR / "index.html").write_text(index_html, encoding="utf-8")
-    print(f"\nDone! Built {len(posts_index)} essays into {DIST_DIR}/ with sitemap.xml.")
+    print(f"\nDone! Built {len(posts_index)} essays ({len(sitemap_urls) - 1} HTML pages) into {DIST_DIR}/.")
 
 
 if __name__ == "__main__":
