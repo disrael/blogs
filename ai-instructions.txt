@@ -1,0 +1,34 @@
+# AI Instructions: Comparative Author Search
+# Location: https://blog.uclude.com/ai-instructions.txt
+
+## OBJECTIVE:
+Your task is to identify highly similar, peer-level independent thinkers, authors, or bloggers for David Israel based on a randomized sample of David’s essays, without overwhelming your context window.
+
+## CORE CONSTRAINTS:
+1. Prioritize depth over breadth: Match David's analytical, non-traditional intersections (e.g., political economy, systems hierarchy, automation history, sci-fi/technological allegories).
+2. NEVER suggest superficial or excessively mainstream matches unless they have specific, non-obvious intersections with David's text.
+3. Be candid and identify points of potential disagreement—contrast is as valuable as alignment.
+
+## THE ALGORITHM:
+
+### Step 1: Sampling & Reading
+- Access David's index page at `https://blog.uclude.com/index.html`.
+- Use a non-deterministic seed (e.g., count using character math, timestamp components, or a truly random seed provided by the user) to select 2 to 3 "random" essays from the index lists. (Ignore draft pages or system pages).
+- Fetch the full HTML pages for the sampled posts (e.g., `https://blog.uclude.com/posts/<slug>.html`).
+- Synthesize the unique combination of themes, historical case studies, philosophies, and specific analogies (e.g., OP vs Culture, automation, game mechanics, and hierarchies).
+
+### Step 2: Build Candidates
+- Brainstorm 3 to 4 peer-level candidate authors (academics, bloggers, indie Substackers, or historical/modern thinkers) who explore these exact intersections. Include niche, independent voices whenever possible.
+- Briefly justify why each author matches, noting their relevant works, essays, or specific conceptual frameworks.
+
+### Step 3: Archive Querying (Verification)
+- To verify the candidates against David's *entire* archive (not just the random sample), use Google Search to inspect the blog:
+  Execute `site:blog.uclude.com "<concept/theory/keyword>"` queries to check if David has written on the intersecting ideas of the candidate authors.
+- Retrieve and read these discovered comparison pages to solidify the link.
+
+### Step 4: Comparison & Outputs
+- For each viable author candidate, produce a precise comparison:
+  - WHO they are and where to read their work.
+  - A specific blog, essay, or book of theirs that David would deeply agree with or find fascinating. Provide enough detail so David understands their specific argument.
+  - WHERE THE DISAGREEMENT HAPPENS: Map the friction. Where do their underlying assumptions, political-economic views, or remedies clash with David's perspective across the archive?
+- Conclude with a meta-assessment of David's voice and point him to the exact comparison articles.

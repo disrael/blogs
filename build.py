@@ -238,6 +238,14 @@ def main():
     (DIST_DIR / ".nojekyll").write_text("", encoding="utf-8")
     (DIST_DIR / "CNAME").write_text("blog.uclude.com", encoding="utf-8")
 
+    # Copy ai-instructions.txt to dist/ if it exists at the workspace root
+    instructions_file = Path("ai-instructions.txt")
+    has_instructions = False
+    if instructions_file.exists():
+        shutil.copy2(instructions_file, DIST_DIR / "ai-instructions.txt")
+        print("  [+] Copied: ai-instructions.txt")
+        has_instructions = True
+
     # Automatically copy any root Google/Bing verification HTML files into dist/
     for html_v in Path(".").glob("google*.html"):
         shutil.copy2(html_v, DIST_DIR / html_v.name)
@@ -301,8 +309,10 @@ def main():
             "char_count": len(plain_text),
         })
 
-    # 1. Generate /sitemap.xml (HTML pages only)
+    # 1. Generate /sitemap.xml (HTML pages and instructions file only)
     sitemap_urls = [f"{SITE_URL}/"]
+    if has_instructions:
+         sitemap_urls.append(f"{SITE_URL}/ai-instructions.txt")
     for p in posts_index:
         sitemap_urls.extend(p["part_urls"])
 
@@ -337,13 +347,17 @@ def main():
                 f'<br><small>{p["date"]} ({cc} chars)</small></li>'
             )
 
+    header_html = f"<h1>{BLOG_TITLE}</h1>"
+    if has_instructions:
+        header_html += f"\n<p>AI Instructions: <a href='{SITE_URL}/ai-instructions.txt'>ai-instructions.txt</a></p>"
+
     index_html = build_html_page(
         title=BLOG_TITLE,
-        content_html=f"<h1>{BLOG_TITLE}</h1>\n<ul>\n" + "\n".join(index_items) + "\n</ul>",
+        content_html=f"{header_html}\n<ul>\n" + "\n".join(index_items) + "\n</ul>",
         canonical_url=f"{SITE_URL}/",
     )
     (DIST_DIR / "index.html").write_text(index_html, encoding="utf-8")
-    print(f"\nDone! Built {len(posts_index)} essays ({len(sitemap_urls) - 1} HTML pages) into {DIST_DIR}/.")
+    print(f"\nDone! Built {len(posts_index)} essays ({len(sitemap_urls) - (2 if has_instructions else 1)} HTML pages) into {DIST_DIR}/.")
 
 
 if __name__ == "__main__":
